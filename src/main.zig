@@ -259,44 +259,45 @@ test "logger" {
     const A = struct {
         const Self = @This();
         
-        aaaa: []const u8,
-        bbbb: []const u8,
+        u81: []const u8,
+        u82: []const u8,
 
         pub fn setB(self: *Self, s: []const u8) void {
-            self.bbbb = s;
+            self.u82 = s;
         }
 
         pub fn getB(self: Self) []const u8 {
-            return self.bbbb;
+            return self.u82;
         }
         pub fn getBRef(self: *Self) []const u8 {
-            return self.bbbb;
+            return self.u82;
         }
     };
 
     var a = A {
-        .aaaa = "aaaa",
-        .bbbb = ""
+        .u81 = "foo",
+        .u82 = ""
     };
 
     const l = logger.new_logger();
-    // a; // main.A
+    
     const arr = [3]u8{'a', 'r', 'r'};
-    const s = "bbbb2";
-    l.println(a.aaaa);
-    l.println(a.bbbb);
+    const s = "bar";
 
-    a.bbbb = "var";
-    l.println(a.bbbb);
+    l.println(a.u81);
+    l.println(a.u82);
+
+    a.u82 = "zoo";
+    l.println(a.u82);
 
     a.setB(s);
-    l.println(a.bbbb);
+    l.println(a.u82);
 
-    a.setB("literal");
-    l.println(a.bbbb);
+    a.setB("qux");
+    l.println(a.u82);
 
     a.setB(&arr);
-    l.println(a.bbbb);
+    l.println(a.u82);
 
     l.println(a.getB());
     l.println(a.getBRef());
