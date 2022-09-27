@@ -39,7 +39,7 @@ pub fn main() !void {
         return;
     };
 
-    l.printf("path {s}\n", .{path});
+    l.printf("real_path {s}\n", .{real_path});
 
     // run time allocation
     var sample_json_path = std.fmt.allocPrint(allocator(), "{s}/{s}", .{real_path, sample_file_name}) catch |err| {
