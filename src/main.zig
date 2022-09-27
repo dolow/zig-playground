@@ -108,8 +108,6 @@ pub fn main() !void {
     const parsed_json = managed_stringify_buf.items;
     l.println(parsed_json);
 
-    l.printf("parsed.root.Object.count(): {}\n", .{parsed.root.Object.count()});
-
     var custom_stringify_buf = std.ArrayList(u8).init(allocator());
     defer custom_stringify_buf.deinit();
 
