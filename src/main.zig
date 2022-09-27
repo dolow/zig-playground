@@ -111,7 +111,7 @@ pub fn main() !void {
     var custom_stringify_buf = std.ArrayList(u8).init(allocator());
     defer custom_stringify_buf.deinit();
 
-    print_json_value(custom_stringify_buf.writer(), &parsed.root, 0);
+    write_json_value(custom_stringify_buf.writer(), &parsed.root, 0);
 
     const custom_parsed_json = custom_stringify_buf.items;
     l.println(custom_parsed_json);
@@ -121,7 +121,7 @@ fn aaaa(writer: io.Writer(*std.ArrayList(u8), error.OutOfMemory, .appendWrite)) 
     try std.fmt.format(writer, "aaaa", .{});
 }
 
-fn print_json_value(writer: anytype, v: *json.Value, depth: u8) void {
+fn write_json_value(writer: anytype, v: *json.Value, depth: u8) void {
     switch (v.*) {
         .Bool => {
             std.fmt.format(writer, "{}", .{v.Bool})
@@ -151,7 +151,7 @@ fn print_json_value(writer: anytype, v: *json.Value, depth: u8) void {
             array_it: for (v.Array.items) |item| {
                 var deitem = item;
                 append_indent(writer, depth + 1);
-                print_json_value(writer, &deitem, depth + 1);
+                write_json_value(writer, &deitem, depth + 1);
 
                 if (i < v.Array.items.len - 1) {
                     std.fmt.format(writer, ",", .{}) catch |err| {
@@ -173,7 +173,7 @@ fn print_json_value(writer: anytype, v: *json.Value, depth: u8) void {
         .Object => {
             std.fmt.format(writer, "{{\n", .{})
                 catch |err| debug.print("{}\n", .{err});
-            print_json_object(writer, &v.Object, depth + 1)
+            write_json_object(writer, &v.Object, depth + 1)
                 catch |err| debug.print("{}\n", .{err});
             append_indent(writer, depth);
             std.fmt.format(writer, "}}", .{})
@@ -193,7 +193,7 @@ fn append_indent(writer: anytype, depth: u8) void {
     }
 }
 
-fn print_json_object(writer: anytype, obj: anytype, depth: u8) !void {
+fn write_json_object(writer: anytype, obj: anytype, depth: u8) !void {
     var i: u8 = 0;
     var it = obj.iterator();
     while (it.next()) |p| {
@@ -203,7 +203,7 @@ fn print_json_object(writer: anytype, obj: anytype, depth: u8) !void {
         append_indent(writer, depth);
         
         try std.fmt.format(writer, "{s}: ", .{k.*});
-        print_json_value(writer, v, depth);
+        write_json_value(writer, v, depth);
 
         if (i < obj.count() - 1) {
             try std.fmt.format(writer, ",", .{});
