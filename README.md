@@ -11,6 +11,6 @@ Repository for logging my zig programming.
 # TEST
 
 ```
-% zig build test
+% zig test ./src/test.zig
 ```
 

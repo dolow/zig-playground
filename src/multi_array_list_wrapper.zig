@@ -53,3 +53,34 @@ pub fn new_multi_array_list_wrapper(comptime T: type) MultiArrayListWrapper(T) {
         .alloc = null,
     };
 }
+
+const shared_acclocator = @import("./shared_allocator.zig");
+const allocator = shared_acclocator.allocator;
+const person = @import("./person.zig");
+
+test "multi array list wrapper" {
+    var wrapper = new_multi_array_list_wrapper(person.Person);
+    defer wrapper.deinit();
+
+    try std.testing.expectError(
+        MultiArrayListWrapperError.AllocationNotBegan,
+        wrapper.add(person.Person{ .name = "Smith", .age = 99 })
+    );
+    try std.testing.expectError(
+        MultiArrayListWrapperError.IndexOutOfBounds,
+        wrapper.at(0)
+    );
+
+    wrapper.set_allocator(allocator());
+
+    const names = [2][]const u8{"John", "Noel"};
+
+    var index: usize = 0;
+    for (names) |name| {
+        try wrapper.add(person.Person{ .name = names[index], .age = 22 });
+        try std.testing.expectEqual(@as(usize, index + 1), wrapper.size());
+        const p = try wrapper.at(index);
+        try std.testing.expectEqual(name, p.name);
+        index += 1;
+    }
+}
