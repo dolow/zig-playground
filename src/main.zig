@@ -117,10 +117,6 @@ pub fn main() !void {
     l.println(custom_parsed_json);
 }
 
-fn aaaa(writer: io.Writer(*std.ArrayList(u8), error.OutOfMemory, .appendWrite)) !void {
-    try std.fmt.format(writer, "aaaa", .{});
-}
-
 fn write_json_value(writer: anytype, v: *json.Value, depth: u8) void {
     switch (v.*) {
         .Bool => {
