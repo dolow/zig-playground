@@ -1,57 +1,87 @@
 const std = @import("std");
 
 const allocator = @import("./shared_allocator.zig").allocator;
-const append = @import("./util.zig").append;
+const util = @import("./util.zig");
 
-pub fn launch(address: []const u8, port: u16) !void {
+pub const Header = struct {
+    key: []u8,
+    lower_key: []u8,
+    value: []u8,
+};
+
+pub fn launch(address: []const u8, port: u16) void {
     var server = std.net.StreamServer.init(.{});
     defer server.deinit();
 
-    const addr = try std.net.Address.parseIp4(address, port);
+    const addr = std.net.Address.parseIp4(address, port) catch |err| {
+        std.debug.print("std.net.Address.parseIp4 error: {}\n", .{err});
+        return;
+    };
     server.listen(addr) catch |err| {
         std.debug.print("failed to listen {s}:{d}, {}\n", .{address, port, err});
         return;
     };
     std.debug.print("Listening on http://{s}:{d}\n\n", .{ address, port });
 
-    var running = true;
+    const cap = 4096;
+    // const cap = 706;
+    // const cap = 16;
+    var buf = allocator().alloc(u8, cap) catch |err| {
+        std.debug.print("could not allocate request reader buffer ({d}), error: {}\n", .{cap, err});
+        return;
+    };
 
+    var running = true;
     defer {
         running = false;
     }
 
-    const cap = 16;
-    var buf = try allocator().alloc(u8, cap);
+    var conn = server.accept() catch |err| {
+        std.debug.print("error occured on server.accept: {}\n", .{err});
+        return;
+    };
 
     while (running) {
-        try serverLoop(&server, buf);
+        serverLoop(&conn, buf) catch |err| {
+            std.debug.print("error occured on serverLoop: {}\n", .{err});
+            return;
+        };
     }
 
     allocator().free(buf);
 }
 
-fn serverLoop(server: *std.net.StreamServer, buf: []u8) !void {
-    const conn = try server.accept();
-    var length = try conn.stream.read(buf);
-    if (length == 0) {
-        return;
-    }
-
+fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
+    var length = buf.len;
+    
     var header: []u8 = try allocator().alloc(u8, 0);
     var body: []u8 = try allocator().alloc(u8, 0);
+    var header_indices: []usize = try allocator().alloc(usize, 0);
 
     var header_end = false;
-    while (length == buf.len and length != 0) {
+    var initial_run = true;
+
+    // TODO:
+    // get request content-length while retrieving headers.
+    // current implementation stacks when the http message size equals to reading buffer size.
+
+    while (initial_run or (length == buf.len)) {
+        if (initial_run) {
+            initial_run = false;
+            header_indices = try util.appendOne(usize, header_indices, 0);
+        }
         length = try conn.stream.read(buf);
-        
+        if (length == 0) {
+            break;
+        }
+        // TODO: just length
         if (header_end) {
-            body = try append(body, buf[0..length]);
+            body = try util.appendStr(body, buf[0..length]);
             continue;
         }
 
         // parse header
         var i: usize = 0;
-        var append_end_index = length;
         while (i < length) : (i += 1) {
             const ch = buf[i];
             if (ch != '\n') {
@@ -85,28 +115,29 @@ fn serverLoop(server: *std.net.StreamServer, buf: []u8) !void {
             }
 
             if (header_end) {
-                append_end_index = i;
+                header = try util.appendStr(header, buf[0..(i + 1)]);
+                if ((i + 1) < length) {
+                    body = try util.appendStr(body, buf[(i + 1)..length]);
+                }
+                break;
+            } else {
+                header_indices = try util.appendOne(usize, header_indices, i + 1);
             }
         }
 
-        
-        header = try append(header, buf[0..append_end_index]);
-
-        if (header_end) {
-            if ((append_end_index + 1) < length) {
-                body = try append(body, buf[(append_end_index + 1)..length]);
-            }
+        if (!header_end) {
+            header = try util.appendStr(header, buf);
         }
     }
 
     std.debug.print("Header\n{s}\n", .{header});
-    std.debug.print("Body\n{s}\n", .{body});
+    std.debug.print("Body\n{s}\n\n", .{body});
 
     var resp_array = std.ArrayList(u8).init(allocator());
     defer resp_array.deinit();
     var content_array = std.ArrayList(u8).init(allocator());
     defer content_array.deinit();
-    
+
     var resp_writer = resp_array.writer();
     var content_writer = content_array.writer();
 
@@ -115,7 +146,7 @@ fn serverLoop(server: *std.net.StreamServer, buf: []u8) !void {
 
     _ = try conn.stream.write(resp_array.items);
 
-    std.debug.print("Reponse\n{s}\n", .{resp_array.items});
+    std.debug.print("Reponse\n{s}\n\n", .{resp_array.items});
 
     allocator().free(header);
     allocator().free(body);
