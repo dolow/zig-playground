@@ -4,6 +4,8 @@ const io = std.io;
 const fs = std.fs;
 const fmt = std.fmt;
 
+pub var logger: *Logger = undefined;
+
 // static struct
 const Logger = struct {
     const Self = @This();
@@ -32,5 +34,5 @@ const Logger = struct {
 };
 
 pub fn new_logger() *const Logger {
-    return &Logger {};
+    return &Logger{};
 }
