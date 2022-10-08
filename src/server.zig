@@ -3,6 +3,12 @@ const std = @import("std");
 const allocator = @import("./shared_allocator.zig").allocator;
 const util = @import("./util.zig");
 
+const HEADER_KEY_SEPARATOR = ':';
+const WHITE_SPACE = ' ';
+const CR = '\r';
+const LF = '\n';
+const HEADER_KEY_CONTENT_LENGTH = "Content-Length";
+
 pub const Header = struct {
     key: []u8,
     lower_key: []u8,
@@ -25,11 +31,13 @@ pub fn launch(address: []const u8, port: u16) void {
 
     const cap = 4096;
     // const cap = 706;
+    // const cap = 353;
     // const cap = 16;
     var buf = allocator().alloc(u8, cap) catch |err| {
         std.debug.print("could not allocate request reader buffer ({d}), error: {}\n", .{cap, err});
         return;
     };
+    defer allocator().free(buf);
 
     var running = true;
     defer {
@@ -47,109 +55,164 @@ pub fn launch(address: []const u8, port: u16) void {
             return;
         };
     }
-
-    allocator().free(buf);
 }
 
 fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
-    var length = buf.len;
-    
     var header: []u8 = try allocator().alloc(u8, 0);
+    defer allocator().free(header);
     var body: []u8 = try allocator().alloc(u8, 0);
-    var header_indices: []usize = try allocator().alloc(usize, 0);
+    defer allocator().free(body);
+    var header_indices: []usize = try allocator().alloc(usize, 1);
+    defer allocator().free(header_indices);
+    header_indices[0] = 0;
+
+    var headers = std.StringArrayHashMap([]u8).init(allocator());
+    defer headers.deinit();
+
+    // header_indices = try util.appendOne(usize, header_indices, 0, true);
 
     var header_end = false;
-    var initial_run = true;
+    var request_content_length: usize = 0;
+    var offset: usize = 0;
 
-    // TODO:
-    // get request content-length while retrieving headers.
-    // current implementation stacks when the http message size equals to reading buffer size.
+    var chunk_length = buf.len;
 
-    while (initial_run or (length == buf.len)) {
-        if (initial_run) {
-            initial_run = false;
-            header_indices = try util.appendOne(usize, header_indices, 0);
-        }
-        length = try conn.stream.read(buf);
-        if (length == 0) {
+    // read header
+    while (!header_end and (offset == 0 or (chunk_length == buf.len))) {
+        if (
+            request_content_length > 0 and offset > 0 and header.len > 0 and
+            (offset == (header.len + request_content_length))
+        ) {
             break;
         }
-        // TODO: just length
-        if (header_end) {
-            body = try util.appendStr(body, buf[0..length]);
-            continue;
+
+        chunk_length = try conn.stream.read(buf);
+        if (chunk_length == 0) {
+            break;
         }
 
         // parse header
         var i: usize = 0;
-        while (i < length) : (i += 1) {
+        while (i < chunk_length) : (i += 1) {
             const ch = buf[i];
-            if (ch != '\n') {
+            if (ch != LF) {
                 continue;
             }
 
             if (i >= 3) {
                 header_end = (
-                    buf[i - 3] == '\r'
-                    and buf[i - 2] == '\n'
-                    and buf[i - 1] == '\r'
+                    buf[i - 3] == CR
+                    and buf[i - 2] == LF
+                    and buf[i - 1] == CR
                 );
             } else if (i == 2 and header.len >= 1) {
                 header_end = (
-                    header[header.len - 1] == '\r'
-                    and buf[i - 2] == '\n'
-                    and buf[i - 1] == '\r'
+                    header[header.len - 1] == CR
+                    and buf[i - 2] == LF
+                    and buf[i - 1] == CR
                 );
             } else if (i == 1 and header.len >= 2) {
                 header_end = (
-                    header[header.len - 2] == '\r'
-                    and header[header.len - 1] == '\n'
-                    and buf[i - 1] == '\r'
+                    header[header.len - 2] == CR
+                    and header[header.len - 1] == LF
+                    and buf[i - 1] == CR
                 );
             } else if (i == 0 and header.len >= 3) {
                 header_end = (
-                    header[header.len - 3] == '\r'
-                    and header[header.len - 2] == '\n'
-                    and header[header.len - 1] == '\r'
+                    header[header.len - 3] == CR
+                    and header[header.len - 2] == LF
+                    and header[header.len - 1] == CR
                 );
             }
 
             if (header_end) {
-                header = try util.appendStr(header, buf[0..(i + 1)]);
-                if ((i + 1) < length) {
-                    body = try util.appendStr(body, buf[(i + 1)..length]);
+                header = try util.appendStr(header, buf[0..(i + 1)], true);
+
+                try parseHeaderLine(header, header_indices, &headers);
+
+                if ((i + 1) < chunk_length) {
+                    body = try util.appendStr(body, buf[(i + 1)..chunk_length], true);
                 }
+
                 break;
-            } else {
-                header_indices = try util.appendOne(usize, header_indices, i + 1);
             }
+
+            header_indices = try util.appendOne(usize, header_indices, offset + i + 1, true);
         }
 
         if (!header_end) {
-            header = try util.appendStr(header, buf);
+            header = try util.appendStr(header, buf, true);
         }
+
+        offset += chunk_length;
     }
 
-    std.debug.print("Header\n{s}\n", .{header});
-    std.debug.print("Body\n{s}\n\n", .{body});
+    const entry = headers.getEntry(HEADER_KEY_CONTENT_LENGTH);
+    if (entry != null) {
+        request_content_length = try std.fmt.parseInt(usize, entry.?.value_ptr.*, 10);
+    }
+
+    // read body
+    while (offset < (header.len + request_content_length)) {
+        chunk_length = try conn.stream.read(buf);
+        if (chunk_length == 0) {
+            break;
+        }
+
+        body = try util.appendStr(body, buf[0..chunk_length], true);
+
+        offset += chunk_length;
+    }
+
+    std.debug.print("Header:\n{s}\n\n", .{header});
+    std.debug.print("Body:\n{s}\n\n", .{body});
 
     var resp_array = std.ArrayList(u8).init(allocator());
-    defer resp_array.deinit();
     var content_array = std.ArrayList(u8).init(allocator());
+    defer resp_array.deinit();
     defer content_array.deinit();
 
     var resp_writer = resp_array.writer();
     var content_writer = content_array.writer();
 
     try content_writer.print("hello world !\nYou sent me following body;\n{s}\n", .{body});
+
     try createResponse(content_array.items, resp_writer);
 
     _ = try conn.stream.write(resp_array.items);
 
     std.debug.print("Reponse\n{s}\n\n", .{resp_array.items});
+}
 
-    allocator().free(header);
-    allocator().free(body);
+fn parseHeaderLine(header: []u8, indices: []usize, out: *std.StringArrayHashMap([]u8)) !void {
+    var j: usize = 0;
+    while (j < (indices.len - 1)) : (j += 1) {
+        const index = indices[j];
+        const next_index = indices[j + 1];
+        const header_line = header[index..next_index];
+        
+        var h_i: usize = 0;
+        var key_to: usize = 0;
+        var value_from: usize = 0;
+        while (h_i < header_line.len) : (h_i += 1) {
+            if (key_to == 0) {
+                if (header_line[h_i] == HEADER_KEY_SEPARATOR) {
+                    key_to = h_i;
+                    continue;
+                }
+            } else {
+                if (header_line[h_i] != WHITE_SPACE) {
+                    value_from = h_i;
+                    break;
+                }
+            }
+        }
+
+        const key = header_line[0..key_to];
+        const value = header_line[value_from..(header_line.len - 2)];
+
+        try out.put(key, value);
+    }
 }
 
 fn createResponse(content: []const u8, writer: std.ArrayList(u8).Writer) !void {
