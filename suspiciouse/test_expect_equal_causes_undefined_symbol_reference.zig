@@ -8,10 +8,6 @@ fn TestType(comptime T: type) type {
         pub fn init(v: T) Self {
             return Self{ .i = v };
         }
-
-        pub fn set(self: *Self, i: T) void {
-            self.i = i;
-        }
         pub fn get(self: *Self) T {
             return self.i;
         }
