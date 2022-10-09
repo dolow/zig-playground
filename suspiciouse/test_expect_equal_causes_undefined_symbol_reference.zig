@@ -20,5 +20,12 @@ test "const_test" {
     // it's ok
     try std.testing.expectEqual(true, (first_expect == t.get()));
     // it's not ok
-    try std.testing.expectEqual(first_expect, t.get());
+    // try std.testing.expectEqual(first_expect, t.get());
+    // suggestion
+    try expectComptimeEqual(u8, first_expect, t.get());
+}
+
+// @TypeOf(anytype) for comptime type causes UndefinedSymbolError
+pub fn expectComptimeEqual(comptime T: type, expected: T, actual: T) !void {
+    try std.testing.expectEqual(expected, actual);
 }
