@@ -10,12 +10,12 @@ const j2y = @import("./json_to_yaml.zig");
 
 const app_name = "hello world";
 
+/// This executable changes it's feature by defined environment variable.
+/// For instance, when JSON is defined, then it proceeds conversion of json to yaml.
 pub fn main() void {
     defer _ = deinit_allocator();
 
     const l = logger.new_logger();
-    l.debugln("hello world");
-    l.debugf("launching {s}\n", .{app_name});
 
     var may_json = std.os.getenv("JSON");
     if (may_json != null) {
@@ -29,6 +29,9 @@ pub fn main() void {
         l.debugln(yaml);
         return;
     }
+
+    l.debugln("hello world");
+    l.debugf("launching {s}\n", .{app_name});
 
     var may_host = std.os.getenv("HOST");
     var may_port = std.os.getenv("PORT");
