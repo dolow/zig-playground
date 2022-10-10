@@ -8,6 +8,12 @@ const WHITE_SPACE = ' ';
 const CR = '\r';
 const LF = '\n';
 const HEADER_KEY_CONTENT_LENGTH = "Content-Length";
+const HEADER_KEY_TRANSFER_ENCODING = "Transfer-Encoding";
+const HEADER_VALUE_TRANSFER_ENCODING_CHUNKED = "chunked";
+
+pub const ServerError = error{
+    NotImplemented,
+};
 
 pub const Header = struct {
     key: []u8,
@@ -58,6 +64,7 @@ pub fn launch(address: []const u8, port: u16) void {
 }
 
 fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
+    // should use ArrayList... but it's practice.
     var header: []u8 = try allocator().alloc(u8, 0);
     defer allocator().free(header);
     var body: []u8 = try allocator().alloc(u8, 0);
@@ -65,11 +72,9 @@ fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
     var header_indices: []usize = try allocator().alloc(usize, 1);
     defer allocator().free(header_indices);
     header_indices[0] = 0;
-
+    
     var headers = std.StringArrayHashMap([]u8).init(allocator());
     defer headers.deinit();
-
-    // header_indices = try util.appendOne(usize, header_indices, 0, true);
 
     var header_end = false;
     var request_content_length: usize = 0;
@@ -147,15 +152,33 @@ fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
         offset += chunk_length;
     }
 
-    const entry = headers.getEntry(HEADER_KEY_CONTENT_LENGTH);
-    if (entry != null) {
-        request_content_length = try std.fmt.parseInt(usize, entry.?.value_ptr.*, 10);
+    const content_length_entry = headers.getEntry(HEADER_KEY_CONTENT_LENGTH);
+    const transfer_encoding_entry = headers.getEntry(HEADER_KEY_TRANSFER_ENCODING);
+    const content_length_header = if (content_length_entry == null) "" else content_length_entry.?.value_ptr.*;
+    const transfer_encoding_header = if (transfer_encoding_entry == null) "" else transfer_encoding_entry.?.value_ptr.*;
+
+    // TODO: test
+    if (content_length_header.len == 0) {
+        if (!std.mem.eql(u8, transfer_encoding_header, HEADER_VALUE_TRANSFER_ENCODING_CHUNKED)) {
+            var response = std.ArrayList(u8).init(allocator());
+            defer response.deinit();
+
+            var writer = response.writer();
+            try create400Response(writer);
+            return;
+        }
     }
+
+    request_content_length = try std.fmt.parseInt(usize, content_length_entry.?.value_ptr.*, 10);
 
     // read body
     while (offset < (header.len + request_content_length)) {
         chunk_length = try conn.stream.read(buf);
         if (chunk_length == 0) {
+            if (offset < (header.len + request_content_length)) {
+                // TODO: wait for another chunk
+                return error.NotImplemented;
+            }
             break;
         }
 
@@ -213,6 +236,11 @@ fn parseHeaderLine(header: []u8, indices: []usize, out: *std.StringArrayHashMap(
 
         try out.put(key, value);
     }
+}
+
+fn create400Response(writer: std.ArrayList(u8).Writer) !void {
+    const content = "Bad Request";
+    try writer.print("HTTP/1.1 400 OK\nContent-Length: {d}\nContent-Type: text/plain; charset=utf-8\n\n{s}", .{content.len, content});
 }
 
 fn createResponse(content: []const u8, writer: std.ArrayList(u8).Writer) !void {
