@@ -28,6 +28,51 @@ pub fn expectComptimeEqual(comptime T: type, expected: T, actual: T) !void {
     try std.testing.expectEqual(expected, actual);
 }
 
+const MyTypes = struct {
+    pub const U8Type = MyType(u8);
+    pub const I8Type = MyType(i8);
+};
+
+fn MyType(comptime T: type) type {
+    return struct {
+        const Self = @This();
+
+        v: T,
+        pub fn init(v: T) Self {
+            return Self{ .v = v };
+        }
+        pub fn get(self: Self) T {
+            return self.v;
+        }
+    };
+}
+fn sum(my_type: MyTypes.U8Type) u8 {
+    return my_type.get() + 10;
+}
+
+test "allocation patterns" {
+    var static_alloc1: [16]u8 = undefined;
+    try std.testing.expectEqual(16, static_alloc1.len);
+
+    const size: usize = 16;
+    var static_alloc2: [size]u8 = undefined;
+    try std.testing.expectEqual(16, static_alloc2.len);
+
+    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
+    defer _ = gpa.deinit();
+    var allocator = gpa.allocator();
+
+    var runtime_alloc = try allocator.alloc(u8, 16);
+    defer allocator.free(runtime_alloc);
+    try std.testing.expectEqual(size, runtime_alloc.len);
+}
+
+test "value as type" {
+    const t = MyType(u8).init(10);
+    const expect: u8 = 20;
+    try std.testing.expectEqual(expect, sum(t));
+}
+
 test "array range" {
     const arr = [10]u8{1, 2, 3, 4, 5, 6, 7, 8, 9, 10};
     const arr2_4 = arr[2..4];
@@ -54,7 +99,7 @@ test "ref/deref self arg test" {
     // try std.testing.expectEqual(true, (0 == t2.mut_get()));
 }
 
-test "ref/deref, mut/imut test" {
+test "type name and mutability check for ref/deref and mut/imut combinations" {
     var _var = TestType(u8).init(0);
     var _var_ptr = &TestType(u8).init(0);
     const _const = TestType(u8).init(0);
@@ -106,7 +151,47 @@ test "ref/deref, mut/imut test" {
     // _const_ptr_deref_to_const.set(1);
     _var_ptr_deref_to_var.set(1);
     _const_ptr_deref_to_var.set(1);
+}
 
+test "reference/copy and mutability check" {
+    const _const = [2]u8{1,2};
+    var _var_const_copy = _const;
+    // _const[1] = 15;
+    _var_const_copy[1] = 16;
+
+    const not_changed: u8 = 2;
+    const changed: u8 = 16;
+    try std.testing.expectEqual(not_changed, _const[1]);
+    try std.testing.expectEqual(changed, _var_const_copy[1]);
+
+    const _ref_const = &[2]u8{1,2};
+    var _var_ref_const = _ref_const;
+    var _var_ref_const_deref = _ref_const.*;
+    // _ref_const[1] = 14;
+    // _var_ref_const[1] = 15;
+    _var_ref_const_deref[1] = 16;
+
+    try std.testing.expectEqual(not_changed, _ref_const[1]);
+    try std.testing.expectEqual(not_changed, _var_ref_const[1]);
+    try std.testing.expectEqual(changed, _var_ref_const_deref[1]);
+
+    var _var = [2]u8{1,2};
+    var _var_copy = _var;
+    var _var_ref = &_var;
+    _var_copy[1] = 16;
+
+    try std.testing.expectEqual(not_changed, _var[1]);
+    try std.testing.expectEqual(changed, _var_copy[1]);
+
+    _var_ref[1] = 16;
+    try std.testing.expectEqual(changed, _var[1]);
+
+    var _ref_var = &[2]u8{1,2};
+    var _ref_var_deref = _ref_var.*;
+    _ref_var_deref[1] = 16;
+
+    try std.testing.expectEqual(changed, _ref_var_deref[1]);
+    try std.testing.expectEqual(not_changed, _ref_var[1]);
 }
 
 test "assign and argument of u8 array" {
