@@ -240,10 +240,10 @@ fn parseHeaderLine(header: []u8, indices: []usize, out: *std.StringArrayHashMap(
 
 fn create400Response(writer: std.ArrayList(u8).Writer) !void {
     const content = "Bad Request";
-    try writer.print("HTTP/1.1 400 OK\nContent-Length: {d}\nContent-Type: text/plain; charset=utf-8\n\n{s}", .{content.len, content});
+    try writer.print("HTTP/1.1 400 OK\r\nContent-Length: {d}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{s}", .{content.len, content});
 }
 
 fn createResponse(content: []const u8, writer: std.ArrayList(u8).Writer) !void {
-    try writer.print("HTTP/1.1 200 OK\nContent-Length: {d}\nContent-Type: text/plain; charset=utf-8\n\n{s}", .{content.len, content});
+    try writer.print("HTTP/1.1 200 OK\r\nContent-Length: {d}\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n{s}", .{content.len, content});
 }
 
