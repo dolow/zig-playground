@@ -17,7 +17,7 @@ pub fn json_file_to_yaml(file_path: []const u8, out: *std.ArrayList(u8)) ![]u8 {
     defer fd.close();
 
     // json.Parser just refer and does not copy key and string value from loaded file content.
-    // therefore the lifetime of  both parsed value and working json content are the same.
+    // therefore the lifetime of both parsed value and working json content are the same.
     // in this case, function receives working buffer to keep responsibility of memory to its caller.
     var buf = std.ArrayList(u8).init(allocator());
     defer buf.deinit();
@@ -61,7 +61,6 @@ pub fn unmarshal_file(fd: fs.File, file_content: *std.ArrayList(u8)) !json.Value
         return err;
     };
 
-    // st.readAll(file_content) catch |err| {
     const read_length = st.readAll(file_content.items) catch |err| {
         l.printf("st.readAll error: {}\n", .{err});
         return err;
