@@ -7,6 +7,7 @@ const HEADER_KEY_SEPARATOR = ':';
 const WHITE_SPACE = ' ';
 const CR = '\r';
 const LF = '\n';
+const HTTP_METHOD_GET = "GET";
 const HEADERS_KEY_METHOD = "METHOD";
 const HEADERS_KEY_PATH = "PATH";
 const HEADERS_KEY_PROTOCOL = "PROTOCOL";
@@ -176,7 +177,7 @@ fn serverLoop(conn: std.net.StreamServer.Connection, buf: []u8) !void {
     const transfer_encoding_header = if (transfer_encoding_entry == null) "" else transfer_encoding_entry.?.value_ptr.*;
     
     // TODO: test
-    if (!std.mem.eql(u8, method, "GET") and content_length_header.len == 0) {
+    if (!std.mem.eql(u8, method, HTTP_METHOD_GET) and content_length_header.len == 0) {
         if (!std.mem.eql(u8, transfer_encoding_header, HEADER_VALUE_TRANSFER_ENCODING_CHUNKED)) {
             try respond400(conn);
             return;
