@@ -7,6 +7,9 @@ const HEADER_KEY_SEPARATOR = ':';
 const WHITE_SPACE = ' ';
 const CR = '\r';
 const LF = '\n';
+const HEADERS_KEY_METHOD = "METHOD";
+const HEADERS_KEY_PATH = "PATH";
+const HEADERS_KEY_PROTOCOL = "PROTOCOL";
 const HEADER_KEY_CONTENT_LENGTH = "Content-Length";
 const HEADER_KEY_TRANSFER_ENCODING = "Transfer-Encoding";
 const HEADER_VALUE_TRANSFER_ENCODING_CHUNKED = "chunked";
@@ -50,20 +53,21 @@ pub fn launch(address: []const u8, port: u16) void {
         running = false;
     }
 
-    var conn = server.accept() catch |err| {
-        std.debug.print("error occured on server.accept: {}\n", .{err});
-        return;
-    };
-
     while (running) {
-        serverLoop(&conn, buf) catch |err| {
+        const conn = server.accept() catch |err| {
+            std.debug.print("error occured on server.accept: {}\n", .{err});
+            return;
+        };
+        std.debug.print("accepted {}\n", .{conn});
+        serverLoop(conn, buf) catch |err| {
             std.debug.print("error occured on serverLoop: {}\n", .{err});
             return;
         };
     }
 }
 
-fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
+fn serverLoop(conn: std.net.StreamServer.Connection, buf: []u8) !void {
+    defer conn.stream.close();
     // should use ArrayList... but it's practice.
     var header: []u8 = try allocator().alloc(u8, 0);
     defer allocator().free(header);
@@ -152,43 +156,56 @@ fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
         offset += chunk_length;
     }
 
+    const method_entry = headers.getEntry(HEADERS_KEY_METHOD);
+    if (method_entry == null) {
+        try respond400(conn);
+        return;
+    }
+    const path_entry = headers.getEntry(HEADERS_KEY_PATH);
+    if (path_entry == null) {
+        try respond400(conn);
+        return;
+    }
+
+    const method = method_entry.?.value_ptr.*;
+    const path = path_entry.?.value_ptr.*;
+
     const content_length_entry = headers.getEntry(HEADER_KEY_CONTENT_LENGTH);
     const transfer_encoding_entry = headers.getEntry(HEADER_KEY_TRANSFER_ENCODING);
     const content_length_header = if (content_length_entry == null) "" else content_length_entry.?.value_ptr.*;
     const transfer_encoding_header = if (transfer_encoding_entry == null) "" else transfer_encoding_entry.?.value_ptr.*;
-
+    
     // TODO: test
-    if (content_length_header.len == 0) {
+    if (!std.mem.eql(u8, method, "GET") and content_length_header.len == 0) {
         if (!std.mem.eql(u8, transfer_encoding_header, HEADER_VALUE_TRANSFER_ENCODING_CHUNKED)) {
-            var response = std.ArrayList(u8).init(allocator());
-            defer response.deinit();
-
-            var writer = response.writer();
-            try create400Response(writer);
+            try respond400(conn);
             return;
         }
     }
 
-    request_content_length = try std.fmt.parseInt(usize, content_length_entry.?.value_ptr.*, 10);
+    std.debug.print("Header:\n{s}\n\n", .{header});
 
-    // read body
-    while (offset < (header.len + request_content_length)) {
-        chunk_length = try conn.stream.read(buf);
-        if (chunk_length == 0) {
-            if (offset < (header.len + request_content_length)) {
-                // TODO: wait for another chunk
-                return error.NotImplemented;
+    if (content_length_header.len > 0) {
+        request_content_length = try std.fmt.parseInt(usize, content_length_header, 10);
+
+        // read body
+        while (offset < (header.len + request_content_length)) {
+            chunk_length = try conn.stream.read(buf);
+            if (chunk_length == 0) {
+                if (offset < (header.len + request_content_length)) {
+                    // TODO: wait for another chunk
+                    return error.NotImplemented;
+                }
+                break;
             }
-            break;
+
+            body = try util.appendStr(body, buf[0..chunk_length], true);
+
+            offset += chunk_length;
         }
 
-        body = try util.appendStr(body, buf[0..chunk_length], true);
-
-        offset += chunk_length;
+        std.debug.print("Body:\n{s}\n\n", .{body});
     }
-
-    std.debug.print("Header:\n{s}\n\n", .{header});
-    std.debug.print("Body:\n{s}\n\n", .{body});
 
     var resp_array = std.ArrayList(u8).init(allocator());
     var content_array = std.ArrayList(u8).init(allocator());
@@ -198,7 +215,11 @@ fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
     var resp_writer = resp_array.writer();
     var content_writer = content_array.writer();
 
-    try content_writer.print("hello world !\nYou sent me following body;\n{s}\n", .{body});
+    if (body.len > 0) {
+        try content_writer.print("hello world !\nYou sent me following body;\n{s}\n", .{body});
+    } else {
+        try content_writer.print("hello world !\nYou get path {s}\n", .{path});
+    }
 
     try createResponse(content_array.items, resp_writer);
 
@@ -208,7 +229,36 @@ fn serverLoop(conn: *std.net.StreamServer.Connection, buf: []u8) !void {
 }
 
 fn parseHeaderLine(header: []u8, indices: []usize, out: *std.StringArrayHashMap([]u8)) !void {
-    var j: usize = 0;
+    const method_path_protocol = header[indices[0]..indices[1]];
+
+    var last_index: usize = 0;
+    var i: usize = 0;
+    while (i < (method_path_protocol.len - 1)) : (i += 1) {
+        if (method_path_protocol[i] == ' ') {
+            const method_entry = out.getEntry(HEADERS_KEY_METHOD);
+            if (method_entry == null) {
+                try out.put(HEADERS_KEY_METHOD, method_path_protocol[last_index..i]);
+                last_index = i;
+                continue;
+            }
+
+            const path_entry = out.getEntry(HEADERS_KEY_PATH);
+            if (path_entry == null) {
+                try out.put(HEADERS_KEY_PATH, method_path_protocol[last_index..i]);
+                last_index = i;
+                continue;
+            }
+
+            const protocol_entry = out.getEntry(HEADERS_KEY_PROTOCOL);
+            if (protocol_entry == null) {
+                try out.put(HEADERS_KEY_PROTOCOL, method_path_protocol[last_index..i]);
+                last_index = i;
+                continue;
+            }
+        }
+    }
+
+    var j: usize = 1;
     while (j < (indices.len - 1)) : (j += 1) {
         const index = indices[j];
         const next_index = indices[j + 1];
@@ -236,6 +286,15 @@ fn parseHeaderLine(header: []u8, indices: []usize, out: *std.StringArrayHashMap(
 
         try out.put(key, value);
     }
+}
+
+fn respond400(conn: std.net.StreamServer.Connection) !void {
+    var response = std.ArrayList(u8).init(allocator());
+    defer response.deinit();
+
+    var writer = response.writer();
+    try create400Response(writer);
+    _ = try conn.stream.write(response.items);
 }
 
 fn create400Response(writer: std.ArrayList(u8).Writer) !void {
