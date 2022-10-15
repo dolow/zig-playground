@@ -21,8 +21,12 @@ test "const_test" {
     try std.testing.expectEqual(true, (first_expect == t.get()));
     // it's not ok
     // try std.testing.expectEqual(first_expect, t.get());
-    // suggestion
+
+    // wrapped
     try expectComptimeEqual(u8, first_expect, t.get());
+    // using built in function @as
+    // https://ziglang.org/documentation/0.9.1/#as
+    try std.testing.expectEqual(@as(u8, first_expect), t.get());
 }
 
 // @TypeOf(anytype) for comptime type causes UndefinedSymbolError
